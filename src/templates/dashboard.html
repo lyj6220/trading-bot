@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Trading Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .current-profit {
+            text-align: center;
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: white;
+        }
+        
+        .profit-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 40px;
+        }
+        
+        .profit-item {
+            text-align: center;
+        }
+        
+        .profit-divider {
+            width: 1px;
+            height: 60px;
+            background-color: #ddd;
+        }
+        
+        .profit-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .profit-value.positive {
+            color: #28a745;
+        }
+        
+        .profit-value.negative {
+            color: #dc3545;
+        }
+        
+        .divider {
+            border-top: 1px solid #ddd;
+            margin: 20px 0;
+        }
+        
+        .trading-stats {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+            background-color: white;
+            margin-bottom: 20px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            flex: 1;
+        }
+        
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 10px;
+            color: #333;
+        }
+        
+        .trading-history, .trading-log {
+            background-color: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        
+        .scroll-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #f8f8f8;
+        }
+        
+        .distribution-chart {
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        
+        .trading-log {
+            background-color: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .scroll-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .trading-log table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .trading-log th {
+            background-color: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+        }
+        
+        .trading-log td {
+            padding: 12px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .trading-log tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        /* 스크롤바 스타일링 */
+        .scroll-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .scroll-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .scroll-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        .scroll-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        .badge {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-weight: normal;
+        }
+        
+        .bg-danger { background-color: #dc3545 !important; }
+        .bg-warning { background-color: #ffc107 !important; }
+        .bg-info { background-color: #17a2b8 !important; }
+        .bg-secondary { background-color: #6c757d !important; }
+        
+        #trading-log pre {
+            font-family: monospace;
+            font-size: 14px;
+            background: none;
+            padding: 0;
+        }
+        
+        .log-row {
+            cursor: pointer;
+        }
+        
+        .log-row:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .log-detail {
+            display: none;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .log-detail pre {
+            margin: 0;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .badge {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-weight: normal;
+        }
+        
+        .decision-distribution {
+            background-color: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .decision-distribution h2 {
+            margin-bottom: 20px;
+        }
+        
+        .current-position {
+            background-color: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .position-info {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .info-item {
+            flex: 1;
+            min-width: 150px;
+            text-align: center;
+        }
+        
+        .info-value {
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        
+        .info-value.positive {
+            color: #28a745;
+        }
+        
+        .info-value.negative {
+            color: #dc3545;
+        }
+        
+        /* NO POSITION 상태일 때 스타일 */
+        #current-position-side:not(.positive):not(.negative) {
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="current-profit">
+        <div class="profit-container">
+            <div class="profit-item">
+                <h3>Current Profit Rate</h3>
+                <div id="current-profit" class="profit-value">0%</div>
+            </div>
+            <div class="profit-divider"></div>
+            <div class="profit-item">
+                <h3>Cumulative Profit Rate</h3>
+                <div id="cumulative-profit" class="profit-value">0%</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="trading-stats">
+        <div class="stat-item">
+            <h3>Total Trades</h3>
+            <div id="total-trades" class="stat-value">0</div>
+        </div>
+        <div class="stat-item">
+            <h3>Long Trades</h3>
+            <div id="long-trades" class="stat-value">0</div>
+        </div>
+        <div class="stat-item">
+            <h3>Short Trades</h3>
+            <div id="short-trades" class="stat-value">0</div>
+        </div>
+        <div class="stat-item">
+            <h3>Average Profit</h3>
+            <div id="avg-profit" class="stat-value">0%</div>
+        </div>
+    </div>
+    
+    <div class="current-position">
+        <h2>Current Position</h2>
+        <div class="position-info">
+            <div class="info-item">
+                <h3>Position</h3>
+                <div id="current-position-side" class="info-value">NO POSITION</div>
+            </div>
+            <div class="info-item">
+                <h3>Entry Price</h3>
+                <div id="current-position-entry" class="info-value">-</div>
+            </div>
+            <div class="info-item">
+                <h3>Current Price</h3>
+                <div id="current-position-price" class="info-value">-</div>
+            </div>
+            <div class="info-item">
+                <h3>Size</h3>
+                <div id="current-position-size" class="info-value">-</div>
+            </div>
+            <div class="info-item">
+                <h3>Leverage</h3>
+                <div id="current-position-leverage" class="info-value">-</div>
+            </div>
+            <div class="info-item">
+                <h3>PnL</h3>
+                <div id="current-position-pnl" class="info-value">-</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="trading-history">
+        <h2>Trading History</h2>
+        <div class="scroll-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Symbol</th>
+                        <th>Position</th>
+                        <th>Leverage</th>
+                        <th>Entry Price</th>
+                        <th>Exit Price</th>
+                        <th>PnL %</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="trading-history"></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="trading-log">
+        <h2>Trading Log</h2>
+        <div class="scroll-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody id="trading-log"></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="distribution-chart">
+        <h2>Trade Decision Distribution</h2>
+        <div id="decision-distribution"></div>
+    </div>
+
+    <script>
+        // 데이터 업데이트 함수들
+        function updateTradingStats() {
+            fetch('/api/trading_stats')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Trading Stats Response:', data);  // 디버깅용 로그
+                    
+                    // 현재 포지션 수익률
+                    const currentProfit = parseFloat(data.current_position.current_profit);
+                    document.getElementById('current-profit').textContent = `${currentProfit}%`;
+                    document.getElementById('current-profit').className = 'profit-value ' + 
+                        (currentProfit > 0 ? 'positive' : currentProfit < 0 ? 'negative' : '');
+                    
+                    // 거래 통계
+                    const stats = data.trading_stats;
+                    console.log('Trading Stats:', stats);  // 디버깅용 로그
+                    
+                    // 통계 업데이트
+                    document.getElementById('total-trades').textContent = stats.total_trades;
+                    document.getElementById('long-trades').textContent = stats.long_trades;
+                    document.getElementById('short-trades').textContent = stats.short_trades;
+                    
+                    // 평균 수익률 (서버에서 받은 값 그대로 사용)
+                    document.getElementById('avg-profit').textContent = `${stats.avg_profit}%`;
+                    
+                    // 누적 수익률 (서버에서 받은 값 그대로 사용)
+                    document.getElementById('cumulative-profit').textContent = `${stats.cumulative_profit}%`;
+                })
+                .catch(error => {
+                    console.error('거래 통계 업데이트 실패:', error);
+                });
+        }
+
+        function updateTradingHistory() {
+            fetch('/api/trading_history')
+                .then(response => response.json())
+                .then(data => {
+                    const tbody = document.getElementById('trading-history');
+                    tbody.innerHTML = data.trades.map(trade => `
+                        <tr>
+                            <td>${trade.timestamp}</td>
+                            <td>${trade.symbol}</td>
+                            <td>${trade.position_type}</td>
+                            <td>${trade.leverage}x</td>
+                            <td>${trade.entry_price ? trade.entry_price.toFixed(2) : '-'}</td>
+                            <td>${trade.exit_price ? trade.exit_price.toFixed(2) : '-'}</td>
+                            <td class="${trade.profit_loss_percentage >= 0 ? 'positive' : 'negative'}">
+                                ${trade.profit_loss_percentage.toFixed(2)}%
+                            </td>
+                            <td>${trade.status}</td>
+                        </tr>
+                    `).join('');
+                })
+                .catch(error => console.error('거래 내역 업데이트 실패:', error));
+        }
+
+        function updateDecisionDistribution() {
+            fetch('/api/decision_distribution')
+                .then(response => response.json())
+                .then(data => {
+                    const positions = Object.keys(data);
+                    const counts = Object.values(data);
+                    
+                    const colors = {
+                        'LONG': '#28a745',    // 초록색
+                        'SHORT': '#dc3545',   // 빨간색
+                        'CLOSE': '#6c757d',   // 회색
+                        'HOLD': '#ffc107'     // 노란색
+                    };
+                    
+                    const trace = {
+                        labels: positions,
+                        values: counts,
+                        type: 'pie',
+                        marker: {
+                            colors: positions.map(pos => colors[pos] || '#6c757d')
+                        },
+                        textinfo: 'label+percent',
+                        hoverinfo: 'label+value+percent',
+                        hole: 0.4  // 도넛 차트 스타일
+                    };
+                    
+                    const layout = {
+                        margin: { t: 20, b: 20, l: 20, r: 20 },
+                        showlegend: false,
+                        height: 300
+                    };
+                    
+                    Plotly.newPlot('decision-distribution', [trace], layout);
+                })
+                .catch(error => console.error('포지션 분포 업데이트 실패:', error));
+        }
+
+        function updateTradingLog() {
+            fetch('/api/trading_logs')
+                .then(response => response.json())
+                .then(data => {
+                    const tbody = document.getElementById('trading-log');
+                    tbody.innerHTML = data.logs.map(log => `
+                        <tr class="log-row" onclick="toggleLogDetail(this)">
+                            <td>${log.timestamp}</td>
+                            <td><span class="badge bg-${getBadgeColor(log.type)}">${log.type}</span></td>
+                            <td>${log.message.split('\n')[0]}</td>
+                        </tr>
+                        <tr class="log-detail" style="display: none;">
+                            <td colspan="3">
+                                <pre>${log.message}</pre>
+                            </td>
+                        </tr>
+                    `).join('');
+                });
+        }
+
+        function toggleLogDetail(row) {
+            const detailRow = row.nextElementSibling;
+            const allDetails = document.querySelectorAll('.log-detail');
+            
+            allDetails.forEach(detail => {
+                if (detail !== detailRow) {
+                    detail.style.display = 'none';
+                }
+            });
+            
+            detailRow.style.display = detailRow.style.display === 'none' ? 'table-row' : 'none';
+        }
+
+        function getBadgeColor(type) {
+            switch(type.toLowerCase()) {
+                case 'error': return 'danger';
+                case 'warning': return 'warning';
+                case 'info': return 'info';
+                default: return 'secondary';
+            }
+        }
+
+        // 실시간 포지션 정보 업데이트 함수
+        function updateCurrentPosition() {
+            fetch('/api/current_position')
+                .then(response => response.json())
+                .then(data => {
+                    const hasSide = data.side && data.side !== 'NONE' && data.side !== '';
+                    
+                    // Position Side
+                    document.getElementById('current-position-side').textContent = 
+                        hasSide ? data.side : 'NO POSITION';
+                    
+                    // Entry Price
+                    document.getElementById('current-position-entry').textContent = 
+                        hasSide ? parseFloat(data.entry_price).toFixed(2) : '-';
+                    
+                    // Current Price
+                    document.getElementById('current-position-price').textContent = 
+                        hasSide ? parseFloat(data.current_price).toFixed(2) : '-';
+                    
+                    // Size
+                    document.getElementById('current-position-size').textContent = 
+                        hasSide ? parseFloat(data.size).toFixed(3) : '-';
+                    
+                    // Leverage
+                    document.getElementById('current-position-leverage').textContent = 
+                        hasSide ? `${data.leverage}x` : '-';
+                    
+                    // PnL
+                    const pnlElement = document.getElementById('current-position-pnl');
+                    if (hasSide) {
+                        const pnl = parseFloat(data.unrealized_pnl);
+                        pnlElement.textContent = `${pnl.toFixed(2)}%`;
+                        pnlElement.className = `info-value ${pnl > 0 ? 'positive' : pnl < 0 ? 'negative' : ''}`;
+                    } else {
+                        pnlElement.textContent = '-';
+                        pnlElement.className = 'info-value';
+                    }
+                })
+                .catch(error => {
+                    console.error('포지션 정보 업데이트 실패:', error);
+                    // 에러 시 NO POSITION 표시
+                    document.getElementById('current-position-side').textContent = 'NO POSITION';
+                    ['entry', 'price', 'size', 'leverage', 'pnl'].forEach(id => {
+                        document.getElementById(`current-position-${id}`).textContent = '-';
+                    });
+                });
+        }
+
+        // 페이지 로드 시와 주기적으로 업데이트
+        document.addEventListener('DOMContentLoaded', () => {
+            updateTradingStats();
+            updateCurrentPosition();  // 추가
+            updateTradingHistory();
+            updateTradingLog();
+            updateDecisionDistribution();
+            
+            // 10초마다 실시간 포지션 업데이트
+            setInterval(updateCurrentPosition, 10000);
+            
+            // 1분마다 나머지 정보 업데이트
+            setInterval(() => {
+                updateTradingStats();
+                updateTradingHistory();
+                updateTradingLog();
+                updateDecisionDistribution();
+            }, 60000);
+        });
+    </script>
+</body>
+</html> 
