@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     libffi-dev \
     libssl-dev \
+    gcc \
+    make \
     && wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz \
     && tar -xzf ta-lib-0.4.0-src.tar.gz \
     && cd ta-lib/ \
@@ -23,7 +25,7 @@ WORKDIR /app
 COPY . .
 
 # Python 의존성 설치
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 # 애플리케이션 시작 명령어
 CMD ["python", "src/main.py"]
