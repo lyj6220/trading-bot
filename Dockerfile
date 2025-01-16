@@ -1,10 +1,12 @@
 # Python 3.10 베이스 이미지 사용
 FROM python:3.10
 
-# 필수 패키지 설치 및 TA-Lib 소스 다운로드 및 빌드
+# 필수 패키지 및 TA-Lib 설치
 RUN apt-get update && apt-get install -y \
     build-essential \
     wget \
+    libffi-dev \
+    libssl-dev \
     && wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz \
     && tar -xzf ta-lib-0.4.0-src.tar.gz \
     && cd ta-lib/ \
