@@ -327,7 +327,7 @@
     <div class="trading-history">
         <h2>Trading History</h2>
         <div class="scroll-container">
-            <table>
+            <table id="trading-history-table">
                 <thead>
                     <tr>
                         <th>Time</th>
@@ -405,22 +405,32 @@
                 .then(response => response.json())
                 .then(data => {
                     const tbody = document.getElementById('trading-history');
-                    tbody.innerHTML = data.trades.map(trade => `
-                        <tr>
-                            <td>${trade.timestamp}</td>
-                            <td>${trade.symbol}</td>
-                            <td>${trade.position_type}</td>
-                            <td>${trade.leverage}x</td>
-                            <td>${trade.entry_price ? trade.entry_price.toFixed(2) : '-'}</td>
-                            <td>${trade.exit_price ? trade.exit_price.toFixed(2) : '-'}</td>
-                            <td class="${trade.profit_loss_percentage >= 0 ? 'positive' : 'negative'}">
-                                ${trade.profit_loss_percentage.toFixed(2)}%
-                            </td>
-                            <td>${trade.status}</td>
-                        </tr>
-                    `).join('');
+                    tbody.innerHTML = data.trades.map(trade => {
+                        const entryPrice = parseFloat(trade.entry_price) || 0;
+                        const exitPrice = parseFloat(trade.exit_price) || 0;
+                        const pnl = parseFloat(trade.profit_loss_percentage) || 0;
+                        
+                        return `
+                            <tr>
+                                <td>${trade.timestamp}</td>
+                                <td>${trade.symbol}</td>
+                                <td>${trade.position_type}</td>
+                                <td>${trade.leverage}x</td>
+                                <td>${entryPrice.toFixed(2)}</td>
+                                <td>${exitPrice > 0 ? exitPrice.toFixed(2) : '-'}</td>
+                                <td class="${pnl >= 0 ? 'positive' : 'negative'}">
+                                    ${pnl.toFixed(2)}%
+                                </td>
+                                <td>${trade.status}</td>
+                            </tr>
+                        `;
+                    }).join('');
                 })
-                .catch(error => console.error('거래 내역 업데이트 실패:', error));
+                .catch(error => {
+                    console.error('거래 내역 업데이트 실패:', error);
+                    document.getElementById('trading-history').innerHTML = 
+                        '<tr><td colspan="8">거래 내역을 불러오는데 실패했습니다.</td></tr>';
+                });
         }
 
         function updateDecisionDistribution() {

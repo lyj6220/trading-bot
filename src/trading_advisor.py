@@ -59,6 +59,9 @@ class TradingAdvisor:
 
 4. 리스크 관리:
 - 리스크 요소:
+
+5. 종합 평가:
+- 종합 평가:
 """
         try:
             response = self.model.generate_content(prompt)

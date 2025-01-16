@@ -167,9 +167,14 @@ def safe_float(value, default=0.0):
 def get_trading_history():
     session = Session()
     try:
+        # 로깅 추가
+        logger.info("거래 내역 조회 시작")
+        
         trades = session.query(Trade).order_by(Trade.timestamp.desc()).limit(100).all()
+        logger.info(f"조회된 거래 수: {len(trades)}")
         
         if not trades:
+            logger.info("거래 내역이 없습니다.")
             return jsonify({
                 'trades': [],
                 'pagination': {
@@ -180,21 +185,29 @@ def get_trading_history():
                 }
             })
         
-        history = [{
-            'timestamp': trade.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            'symbol': trade.symbol,
-            'position_type': trade.position_type,
-            'leverage': trade.leverage,
-            'entry_price': f"{safe_float(trade.entry_price):.2f}" if trade.entry_price else "-",
-            'exit_price': f"{safe_float(trade.exit_price):.2f}" if trade.exit_price and trade.status == 'Closed' else "-",
-            'profit_loss': round(safe_float(trade.profit_loss), 2),
-            'profit_loss_percentage': round(safe_float(trade.profit_loss_percentage), 2),
-            'status': trade.status,
-            'investment_ratio': trade.investment_ratio,
-            'decision_reason': trade.decision_reason
-        } for trade in trades]
+        history = []
+        for trade in trades:
+            try:
+                trade_data = {
+                    'timestamp': trade.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                    'symbol': trade.symbol,
+                    'position_type': trade.position_type,
+                    'leverage': trade.leverage,
+                    'entry_price': f"{safe_float(trade.entry_price):.2f}" if trade.entry_price else "-",
+                    'exit_price': f"{safe_float(trade.exit_price):.2f}" if trade.exit_price and trade.status == 'Closed' else "-",
+                    'profit_loss': round(safe_float(trade.profit_loss), 2),
+                    'profit_loss_percentage': round(safe_float(trade.profit_loss_percentage), 2),
+                    'status': trade.status,
+                    'investment_ratio': trade.investment_ratio,
+                    'decision_reason': trade.decision_reason
+                }
+                history.append(trade_data)
+                logger.info(f"거래 데이터 처리: {trade.symbol} - {trade.position_type} - {trade.status}")
+            except Exception as e:
+                logger.error(f"거래 데이터 처리 중 오류: {e}, trade_id: {trade.id}")
+                continue
         
-        return jsonify({
+        response = {
             'trades': history,
             'pagination': {
                 'current_page': 1,
@@ -202,7 +215,10 @@ def get_trading_history():
                 'total_trades': len(trades),
                 'per_page': 100
             }
-        })
+        }
+        
+        logger.info(f"거래 내역 응답: {len(history)}개의 거래")
+        return jsonify(response)
         
     except Exception as e:
         logger.error(f"거래 내역 조회 실패: {e}")
@@ -310,29 +326,18 @@ def get_current_position():
         logger.error(f"현재 포지션 조회 실패: {e}")
         return jsonify({'error': str(e)}), 500
 
-def wait_for_next_hour():
-    """다음 시간봉 시작까지 대기"""
-    now = datetime.now()
-    # 현재 시간이 정각 + 1분 이전이면 다음 정각 + 1분까지 대기
-    # 현재 시간이 정각 + 1분 이후면 다음 정각 + 1분까지 대기
-    next_hour = now.replace(minute=0, second=0, microsecond=0)
-    if now >= next_hour:
-        next_hour += timedelta(hours=1)
-    
-    target_time = next_hour + timedelta(minutes=1)  # 정각 후 1분
-    wait_seconds = (target_time - now).total_seconds()
-    
-    if wait_seconds > 0:
-        logger.info(f"다음 실행까지 {wait_seconds:.0f}초 대기")
-        logger.info(f"다음 실행 시간: {target_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        time.sleep(wait_seconds)
-
 def run_trading_bot():
     """트레이딩 봇 실행"""
     while True:
         try:
-            # 다음 실행 시간까지 대기
-            wait_for_next_hour()
+            current_time = datetime.now()
+            # 다음 시간 정각 계산
+            next_hour = current_time.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            # 다음 실행까지 대기 시간 계산 (1분 추가)
+            wait_seconds = (next_hour - current_time).total_seconds() + 60
+            
+            logger.info(f"다음 실행 시간까지 대기: {wait_seconds/60:.1f}분")
+            time.sleep(wait_seconds)
             
             current_time = datetime.now()
             logger.info(f"=== 트레이딩 봇 실행 시작 ===")
@@ -407,34 +412,43 @@ def run_trading_bot():
                 result = executor.execute_trade(symbol=symbol, trading_decision=decision)
                 current_price = executor.get_current_price(symbol)
                 
-                # HOLD 포지션도 로그에 기록
-                log_trade(
-                    symbol=symbol,
-                    position_type=decision['position'],
-                    leverage=int(decision.get('leverage', 0)),
-                    investment_ratio=float(decision.get('investment_ratio', 0)),
-                    entry_price=current_price,
-                    decision_reason=full_analysis
-                )
-                
-                if result:
-                    log_message("Info", f"{decision['position']} 포지션 실행 완료")
+                if result:  # 거래가 성공했을 때
+                    log_trade(
+                        symbol=symbol,
+                        position_type=decision['position'],
+                        leverage=int(decision.get('leverage', 0)),
+                        investment_ratio=float(decision.get('investment_ratio', 0)),
+                        entry_price=current_price,
+                        decision_reason=full_analysis
+                    )
                     update_trade(symbol, current_price)
                 else:
                     if decision['position'] == 'HOLD':
-                        log_message("Info", "HOLD 포지션 유지")
+                        log_message("Info", "HOLD 포지션 유지", decision_reason=full_analysis)
                     else:
-                        log_message("Info", "거래 실행 건너뜀")
+                        log_message("Warning", 
+                                   f"거래 실행 건너뜀 (포지션: {decision['position']})", 
+                                   position_type=decision['position'],
+                                   decision_reason=full_analysis)
                         
             except Exception as e:
-                log_message("Error", "거래 실행 중 예외 발생: " + str(e))
+                error_msg = f"거래 실행 중 예외 발생: {str(e)}"
+                log_message("Error", error_msg, 
+                            position_type=decision.get('position'),
+                            decision_reason=full_analysis)
+                logger.error(error_msg)
             
             logger.info("=== 트레이딩 봇 실행 완료 ===\n")
             
+            # 테스트를 위해 10초 대기 후 다시 실행
+            time.sleep(60)
+            
         except Exception as e:
-            logger.error(f"에러 발생: {e}")
-            log_message("Error", f"에러 발생: {e}")
-            time.sleep(60)  # 에러 발생 시 1분 대기 후 재시도
+            error_msg = f"트레이딩 봇 실행 중 에러 발생: {str(e)}"
+            log_message("Error", error_msg)
+            logger.error(error_msg)
+            # 에러 발생 시 1분 대기 후 재시도
+            time.sleep(60)
 
 def main():
     load_dotenv()
