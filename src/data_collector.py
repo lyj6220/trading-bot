@@ -2,10 +2,10 @@ from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 import ccxt
-import talib
 from datetime import datetime, timedelta
 import logging
 import json
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class MarketDataCollector:
                 'recvWindow': 10000
             }
         })
-        
+
     def _get_historical_data(self, symbol: str, timeframe: str = '1h', limit: int = 500) -> pd.DataFrame:
         """과거 데이터 조회"""
         try:
@@ -35,92 +35,192 @@ class MarketDataCollector:
             raise
 
     def _calculate_moving_averages(self, df: pd.DataFrame) -> Dict[str, float]:
-        """이동평균선 계산"""
-        close_prices = df['close'].values
+        """이동평균선 계산 (talib 제거, pandas 사용)"""
+        close_prices = df['close']
         ma_periods = [5, 20, 50, 200]
         mas = {}
-        
+
         for period in ma_periods:
-            sma = talib.SMA(close_prices, timeperiod=period)
-            ema = talib.EMA(close_prices, timeperiod=period)
-            mas[f'ma_{period}'] = float(sma[-1])
-            mas[f'ema_{period}'] = float(ema[-1])
-        
+            sma_series = close_prices.rolling(window=period).mean()
+            ema_series = close_prices.ewm(span=period, adjust=False).mean()
+            mas[f'ma_{period}'] = float(sma_series.iloc[-1])
+            mas[f'ema_{period}'] = float(ema_series.iloc[-1])
+
         # 골든/데드 크로스 확인
         mas['golden_cross'] = mas['ma_5'] > mas['ma_20'] and mas['ma_20'] > mas['ma_50']
         mas['death_cross'] = mas['ma_5'] < mas['ma_20'] and mas['ma_20'] < mas['ma_50']
-        
+
         return mas
 
     def _calculate_rsi(self, df: pd.DataFrame, period: int = 14) -> Dict[str, float]:
-        """RSI 계산"""
-        close_prices = df['close'].values
-        rsi = talib.RSI(close_prices, timeperiod=period)
-        rsi_current = float(rsi[-1])
-        
-        # RSI 다이버전스 확인
-        price_trend = np.diff(close_prices[-5:]).mean()
-        rsi_trend = np.diff(rsi[-5:]).mean()
-        
+        """RSI 계산 (talib 제거, pandas 사용)"""
+        close_prices = df['close']
+        delta = close_prices.diff()
+
+        # 상승폭과 하락폭 분리
+        gain = delta.where(delta > 0, 0.0)
+        loss = -delta.where(delta < 0, 0.0)
+
+        # 지수이동평균(EMA)로 평균 상승폭, 평균 하락폭 계산
+        avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
+        avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
+
+        rs = avg_gain / avg_loss
+        rsi_series = 100 - (100 / (1 + rs))
+        rsi_current = float(rsi_series.iloc[-1])
+
+        # RSI 다이버전스 확인(간단 버전)
+        recent_close_diff = np.diff(close_prices.iloc[-5:].values).mean()
+        recent_rsi_diff = np.diff(rsi_series.iloc[-5:].values).mean()
+
+        divergence = 'none'
+        if recent_close_diff < 0 and recent_rsi_diff > 0:
+            divergence = 'bullish'
+        elif recent_close_diff > 0 and recent_rsi_diff < 0:
+            divergence = 'bearish'
+
         return {
             'current': rsi_current,
-            'divergence': 'bullish' if price_trend < 0 and rsi_trend > 0 else 'bearish' if price_trend > 0 and rsi_trend < 0 else 'none'
+            'divergence': divergence
         }
 
     def _calculate_macd(self, df: pd.DataFrame) -> Dict[str, float]:
-        """MACD 계산"""
-        close_prices = df['close'].values
-        macd, signal, hist = talib.MACD(close_prices)
-        
+        """MACD 계산 (talib 제거, pandas 사용)"""
+        close_prices = df['close']
+        ema12 = close_prices.ewm(span=12, adjust=False).mean()
+        ema26 = close_prices.ewm(span=26, adjust=False).mean()
+        macd_line = ema12 - ema26
+        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+        histogram = macd_line - signal_line
+
+        # 교차 확인
+        # 직전 값과 비교가 필요하므로 인덱스 에러를 피하기 위해 조건 처리
+        if len(macd_line) < 2:
+            cross_above = False
+            cross_below = False
+        else:
+            cross_above = (macd_line.iloc[-1] > signal_line.iloc[-1]) and (macd_line.iloc[-2] <= signal_line.iloc[-2])
+            cross_below = (macd_line.iloc[-1] < signal_line.iloc[-1]) and (macd_line.iloc[-2] >= signal_line.iloc[-2])
+
         return {
-            'macd': float(macd[-1]),
-            'signal': float(signal[-1]),
-            'histogram': float(hist[-1]),
-            'cross_above': macd[-1] > signal[-1] and macd[-2] <= signal[-2],
-            'cross_below': macd[-1] < signal[-1] and macd[-2] >= signal[-2]
+            'macd': float(macd_line.iloc[-1]),
+            'signal': float(signal_line.iloc[-1]),
+            'histogram': float(histogram.iloc[-1]),
+            'cross_above': cross_above,
+            'cross_below': cross_below
         }
 
     def _calculate_bollinger(self, df: pd.DataFrame, period: int = 20) -> Dict[str, float]:
-        """볼린저 밴드 계산"""
-        close_prices = df['close'].values
-        upper, middle, lower = talib.BBANDS(close_prices, timeperiod=period)
-        current_price = close_prices[-1]
-        
+        """볼린저 밴드 계산 (talib 제거, pandas 사용)"""
+        close_prices = df['close']
+        rolling_mean = close_prices.rolling(window=period).mean()
+        rolling_std = close_prices.rolling(window=period).std()
+
+        upper = rolling_mean + 2 * rolling_std
+        middle = rolling_mean
+        lower = rolling_mean - 2 * rolling_std
+
+        current_price = close_prices.iloc[-1]
+        upper_val = float(upper.iloc[-1])
+        middle_val = float(middle.iloc[-1])
+        lower_val = float(lower.iloc[-1])
+
+        # 밴드폭, 현재 가격 위치
+        if middle_val != 0:
+            bandwidth = (upper_val - lower_val) / middle_val
+        else:
+            bandwidth = 0.0
+
+        if (upper_val - lower_val) != 0:
+            position = (current_price - lower_val) / (upper_val - lower_val)
+        else:
+            position = 0.0
+
         return {
-            'upper': float(upper[-1]),
-            'middle': float(middle[-1]),
-            'lower': float(lower[-1]),
-            'bandwidth': float((upper[-1] - lower[-1]) / middle[-1]),
-            'position': float((current_price - lower[-1]) / (upper[-1] - lower[-1]))
+            'upper': upper_val,
+            'middle': middle_val,
+            'lower': lower_val,
+            'bandwidth': bandwidth,
+            'position': position
         }
 
     def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
-        """ATR 계산"""
-        high = df['high'].values
-        low = df['low'].values
-        close = df['close'].values
-        return float(talib.ATR(high, low, close, timeperiod=period)[-1])
+        """ATR 계산 (talib 제거, pandas 사용, 기본적으로 Wilder’s Moving Average 가정)"""
+        high = df['high']
+        low = df['low']
+        close = df['close']
+
+        # TR 계산
+        df_atr = df.copy()
+        df_atr['prev_close'] = df_atr['close'].shift(1)
+        df_atr['tr1'] = abs(df_atr['high'] - df_atr['low'])
+        df_atr['tr2'] = abs(df_atr['high'] - df_atr['prev_close'])
+        df_atr['tr3'] = abs(df_atr['low'] - df_atr['prev_close'])
+        df_atr['TR'] = df_atr[['tr1', 'tr2', 'tr3']].max(axis=1)
+
+        # ATR = TR의 지수이동평균(기본적으로 Welles Wilder는 특수 계산, 여기서는 ewm으로 대체)
+        df_atr['ATR'] = df_atr['TR'].ewm(span=period, adjust=False).mean()
+
+        return float(df_atr['ATR'].iloc[-1])
 
     def _calculate_adx(self, df: pd.DataFrame, period: int = 14) -> Dict[str, float]:
-        """ADX 계산"""
-        high = df['high'].values
-        low = df['low'].values
-        close = df['close'].values
-        adx = talib.ADX(high, low, close, timeperiod=period)
-        adx_value = float(adx[-1])
-        
+        """ADX 계산 (talib 제거, pandas 사용, 기본 로직 구현)"""
+        # ADX 는 +DI, -DI, DX 를 거쳐 계산됨
+        df_adx = df.copy()
+        df_adx['prev_close'] = df_adx['close'].shift(1)
+        df_adx['prev_high'] = df_adx['high'].shift(1)
+        df_adx['prev_low'] = df_adx['low'].shift(1)
+
+        # DM+
+        df_adx['+DM'] = np.where(
+            (df_adx['high'] - df_adx['prev_high']) > (df_adx['prev_low'] - df_adx['low']),
+            np.maximum(df_adx['high'] - df_adx['prev_high'], 0),
+            0
+        )
+        # DM-
+        df_adx['-DM'] = np.where(
+            (df_adx['prev_low'] - df_adx['low']) > (df_adx['high'] - df_adx['prev_high']),
+            np.maximum(df_adx['prev_low'] - df_adx['low'], 0),
+            0
+        )
+        # TR
+        df_adx['TR1'] = df_adx['high'] - df_adx['low']
+        df_adx['TR2'] = abs(df_adx['high'] - df_adx['prev_close'])
+        df_adx['TR3'] = abs(df_adx['low'] - df_adx['prev_close'])
+        df_adx['TR'] = df_adx[['TR1', 'TR2', 'TR3']].max(axis=1)
+
+        # smoothed TR, +DM, -DM (지수이동평균 사용)
+        df_adx['TR_ewm'] = df_adx['TR'].ewm(span=period, adjust=False).mean()
+        df_adx['+DM_ewm'] = df_adx['+DM'].ewm(span=period, adjust=False).mean()
+        df_adx['-DM_ewm'] = df_adx['-DM'].ewm(span=period, adjust=False).mean()
+
+        df_adx['+DI'] = 100 * (df_adx['+DM_ewm'] / df_adx['TR_ewm'])
+        df_adx['-DI'] = 100 * (df_adx['-DM_ewm'] / df_adx['TR_ewm'])
+
+        df_adx['DX'] = 100 * abs(df_adx['+DI'] - df_adx['-DI']) / (df_adx['+DI'] + df_adx['-DI'])
+        df_adx['ADX'] = df_adx['DX'].ewm(span=period, adjust=False).mean()
+
+        adx_value = float(df_adx['ADX'].iloc[-1])
+
+        if adx_value > 25:
+            trend_strength = 'strong'
+        elif adx_value < 20:
+            trend_strength = 'weak'
+        else:
+            trend_strength = 'moderate'
+
         return {
             'adx': adx_value,
-            'trend_strength': 'strong' if adx_value > 25 else 'weak' if adx_value < 20 else 'moderate'
+            'trend_strength': trend_strength
         }
 
     def _analyze_volume_trend(self, df: pd.DataFrame) -> Dict[str, float]:
-        """거래량 트렌드 분석"""
-        volume = df['volume'].values
-        vol_sma = talib.SMA(volume, timeperiod=20)
-        current_vol = float(volume[-1])
-        vol_sma_current = float(vol_sma[-1])
-        
+        """거래량 트렌드 분석 (talib 제거, pandas 사용)"""
+        volume = df['volume']
+        vol_sma = volume.rolling(window=20).mean()
+        current_vol = float(volume.iloc[-1])
+        vol_sma_current = float(vol_sma.iloc[-1])
+
         return {
             'current_volume': current_vol,
             'volume_sma': vol_sma_current,
@@ -128,16 +228,32 @@ class MarketDataCollector:
         }
 
     def _calculate_obv(self, df: pd.DataFrame) -> Dict[str, float]:
-        """OBV(On Balance Volume) 계산"""
+        """OBV(On Balance Volume) 계산 (talib 제거, pandas 사용)"""
+        # OBV는 close가 전 봉보다 상승하면 거래량을 더하고, 하락하면 거래량을 빼고, 동일하면 변화 없음
+        obv_series = [0]
         close = df['close'].values
         volume = df['volume'].values
-        obv = talib.OBV(close, volume)
-        obv_sma = talib.SMA(obv, timeperiod=20)
-        
+
+        for i in range(1, len(close)):
+            if close[i] > close[i - 1]:
+                obv_series.append(obv_series[-1] + volume[i])
+            elif close[i] < close[i - 1]:
+                obv_series.append(obv_series[-1] - volume[i])
+            else:
+                obv_series.append(obv_series[-1])
+
+        df_obv = pd.Series(obv_series, index=df.index)
+        obv_sma = df_obv.rolling(window=20).mean()
+
+        current_obv = float(df_obv.iloc[-1])
+        sma_obv = float(obv_sma.iloc[-1]) if not np.isnan(obv_sma.iloc[-1]) else 0.0
+
+        trend = 'bullish' if current_obv > sma_obv else 'bearish'
+
         return {
-            'current': float(obv[-1]),
-            'sma': float(obv_sma[-1]),
-            'trend': 'bullish' if obv[-1] > obv_sma[-1] else 'bearish'
+            'current': current_obv,
+            'sma': sma_obv,
+            'trend': trend
         }
 
     def _get_open_interest(self, symbol: str) -> float:
@@ -168,11 +284,11 @@ class MarketDataCollector:
         try:
             # 현재 OI 조회
             current_oi = self._get_open_interest(symbol)
-            
+
             # 24시간 전 데이터 조회
             yesterday = int((datetime.now() - timedelta(days=1)).timestamp() * 1000)
             history = self.exchange.fetch_open_interest_history(symbol, since=yesterday, limit=1)
-            
+
             if history and len(history) > 0 and 'info' in history[0]:
                 yesterday_oi = float(history[0]['info'].get('openInterest', 0))
                 if yesterday_oi > 0:
@@ -194,12 +310,7 @@ class MarketDataCollector:
 1. 최근 50봉 가격정보:
 {json.dumps(analysis_result['price_history'], indent=2, ensure_ascii=False)}
 
-2. 캔들스틱 패턴:
-상승 반전: {format_patterns(analysis_result['patterns']['reversal_bullish'])}
-하락 반전: {format_patterns(analysis_result['patterns']['reversal_bearish'])}
-지속 패턴: {format_patterns(analysis_result['patterns']['continuation'])}
-
-3. 기술적 지표:
+2. 기술적 지표:
 이동평균선:
 - MA5: {analysis_result['indicators']['ma']['ma_5']:.2f}
 - MA20: {analysis_result['indicators']['ma']['ma_20']:.2f}
@@ -223,129 +334,19 @@ MACD:
 ATR: {analysis_result['indicators']['atr']:.2f}
 ADX: {analysis_result['indicators']['adx']['adx']:.2f} ({analysis_result['indicators']['adx']['trend_strength']})
 
-4. 거래량 분석:
+3. 거래량 분석:
 - 현재 거래량: {analysis_result['volume']['volume_trend']['current_volume']:.2f}
 - 20일 평균: {analysis_result['volume']['volume_trend']['volume_sma']:.2f}
 - 트렌드: {analysis_result['volume']['volume_trend']['volume_trend']}
 - OBV 트렌드: {analysis_result['volume']['obv']['trend']}
 
-5. 파생상품 데이터:
+4. 파생상품 데이터:
 - 오픈 인터레스트: {analysis_result['derivatives']['open_interest']:.2f}
 - 펀딩비: {analysis_result['derivatives']['funding_rate']:.4%}
 - OI 변화율: {analysis_result['derivatives']['oi_change']:.2f}%
 """
         return template
 
-    def get_candlestick_patterns(self, df: pd.DataFrame) -> Dict[str, List[dict]]:
-        """캔들스틱 패턴 감지 및 신뢰도 계산"""
-        patterns = {
-            'reversal_bullish': [],
-            'reversal_bearish': [],
-            'continuation': []
-        }
-        
-        open_data = df['open'].values
-        high_data = df['high'].values
-        low_data = df['low'].values
-        close_data = df['close'].values
-        
-        def calculate_confidence(pattern_value: int, price_movement: float, volume_confirm: bool) -> float:
-            """패턴 신뢰도 계산"""
-            # 패턴 강도를 0-100 스케일로 변환
-            pattern_strength = abs(pattern_value)
-            
-            # 기본 신뢰도 (60%)
-            base_confidence = (pattern_strength / 100) * 60
-            
-            # 가격 움직임 가중치 (20%)
-            price_weight = min(abs(price_movement) * 2, 20)
-            
-            # 거래량 확인 가중치 (20%)
-            volume_weight = 20 if volume_confirm else 0
-            
-            return min(round(base_confidence + price_weight + volume_weight, 1), 100)
-
-        # 상승 반전 패턴
-        pattern_funcs_bullish = {
-            'hammer': (talib.CDLHAMMER, 0.5),
-            'morning_star': (talib.CDLMORNINGSTAR, 0.8),
-            'piercing_line': (talib.CDLPIERCING, 0.6),
-            'bullish_engulfing': (talib.CDLENGULFING, 0.7),
-            'three_white_soldiers': (talib.CDL3WHITESOLDIERS, 0.9)
-        }
-        
-        # 최근 3개 봉의 거래량 평균보다 현재 거래량이 큰지 확인
-        volume_data = df['volume'].values
-        recent_volume_avg = np.mean(volume_data[-4:-1])
-        volume_confirm = volume_data[-1] > recent_volume_avg
-        
-        # 가격 변동폭 계산
-        recent_price_change = (close_data[-1] - open_data[-1]) / open_data[-1] * 100
-        
-        # 상승 반전 패턴 감지
-        for pattern_name, (pattern_func, weight) in pattern_funcs_bullish.items():
-            result = pattern_func(open_data, high_data, low_data, close_data)
-            # 모든 결과를 포함하되, 신뢰도 계산
-            confidence = calculate_confidence(
-                result[-1] if result[-1] != 0 else 1,  # 패턴이 없으면 최소값
-                recent_price_change,
-                volume_confirm
-            ) * weight
-            
-            patterns['reversal_bullish'].append({
-                'pattern': pattern_name,
-                'confidence': confidence if result[-1] != 0 else 0  # 패턴이 없으면 0%
-            })
-        
-        # 하락 반전 패턴
-        pattern_funcs_bearish = {
-            'shooting_star': (talib.CDLSHOOTINGSTAR, 0.5),
-            'evening_star': (talib.CDLEVENINGSTAR, 0.8),
-            'bearish_engulfing': (talib.CDLENGULFING, 0.7),
-            'three_black_crows': (talib.CDL3BLACKCROWS, 0.9)
-        }
-        
-        for pattern_name, (pattern_func, weight) in pattern_funcs_bearish.items():
-            result = pattern_func(open_data, high_data, low_data, close_data)
-            confidence = calculate_confidence(
-                result[-1] if result[-1] != 0 else 1,
-                recent_price_change,
-                volume_confirm
-            ) * weight
-            
-            patterns['reversal_bearish'].append({
-                'pattern': pattern_name,
-                'confidence': confidence if result[-1] != 0 else 0
-            })
-        
-        # 지속 패턴
-        pattern_funcs_continuation = {
-            'doji': (talib.CDLDOJI, 0.4),
-            'spinning_top': (talib.CDLSPINNINGTOP, 0.3),
-            'marubozu': (talib.CDLMARUBOZU, 0.6)
-        }
-        
-        for pattern_name, (pattern_func, weight) in pattern_funcs_continuation.items():
-            result = pattern_func(open_data, high_data, low_data, close_data)
-            confidence = calculate_confidence(
-                result[-1] if result[-1] != 0 else 1,
-                recent_price_change,
-                volume_confirm
-            ) * weight
-            
-            patterns['continuation'].append({
-                'pattern': pattern_name,
-                'confidence': confidence if result[-1] != 0 else 0
-            })
-        
-        # 각 카테고리별로 신뢰도 순으로 정렬
-        for category in patterns:
-            patterns[category] = sorted(patterns[category], 
-                                      key=lambda x: x['confidence'], 
-                                      reverse=True)
-        
-        return patterns
-    
     def get_technical_indicators(self, df: pd.DataFrame) -> Dict[str, float]:
         """기술적 지표 계산"""
         indicators = {
@@ -357,7 +358,7 @@ ADX: {analysis_result['indicators']['adx']['adx']:.2f} ({analysis_result['indica
             'adx': self._calculate_adx(df)
         }
         return indicators
-    
+
     def get_volume_analysis(self, df: pd.DataFrame) -> Dict[str, dict]:
         """거래량 분석"""
         volume_data = {
@@ -365,7 +366,7 @@ ADX: {analysis_result['indicators']['adx']['adx']:.2f} ({analysis_result['indica
             'obv': self._calculate_obv(df)
         }
         return volume_data
-    
+
     def get_derivatives_data(self, symbol: str) -> Dict[str, float]:
         """파생상품 데이터 수집"""
         derivatives = {
@@ -378,21 +379,20 @@ ADX: {analysis_result['indicators']['adx']['adx']:.2f} ({analysis_result['indica
     def prepare_llm_input(self, symbol: str, timeframe: str = '1h') -> str:
         """LLM 입력용 데이터 준비"""
         df = self._get_historical_data(symbol, timeframe=timeframe)
-        
+
         # 최근 50봉 가격정보를 JSON 형식으로 변환
         recent_candles = df.tail(50).copy()
         recent_candles['timestamp'] = recent_candles['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
         price_history = recent_candles.to_dict('records')
-        
+
         analysis_result = {
             'timestamp': datetime.now().isoformat(),
             'symbol': symbol,
             'timeframe': timeframe,
-            'price_history': price_history,  # 가격 이력 추가
-            'patterns': self.get_candlestick_patterns(df),
+            'price_history': price_history,
             'indicators': self.get_technical_indicators(df),
             'volume': self.get_volume_analysis(df),
             'derivatives': self.get_derivatives_data(symbol)
         }
-        
-        return self._format_for_llm(analysis_result) 
+
+        return self._format_for_llm(analysis_result)
