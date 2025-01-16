@@ -154,6 +154,15 @@ def get_trading_stats():
     finally:
         session.close()
 
+def safe_float(value, default=0.0):
+    """안전한 float 변환 함수"""
+    if value is None or str(value).strip() == '' or str(value).strip() == 'None':
+        return default
+    try:
+        return float(str(value).strip())
+    except (ValueError, TypeError):
+        return default
+
 @app.route('/api/trading_history')
 def get_trading_history():
     session = Session()
@@ -176,10 +185,10 @@ def get_trading_history():
             'symbol': trade.symbol,
             'position_type': trade.position_type,
             'leverage': trade.leverage,
-            'entry_price': f"{float(trade.entry_price):.2f}" if trade.entry_price else "-",
-            'exit_price': f"{float(trade.exit_price):.2f}" if trade.exit_price and trade.status == 'Closed' else "-",
-            'profit_loss': round(float(trade.profit_loss or 0), 2),
-            'profit_loss_percentage': calculate_pnl(trade),
+            'entry_price': f"{safe_float(trade.entry_price):.2f}" if trade.entry_price else "-",
+            'exit_price': f"{safe_float(trade.exit_price):.2f}" if trade.exit_price and trade.status == 'Closed' else "-",
+            'profit_loss': round(safe_float(trade.profit_loss), 2),
+            'profit_loss_percentage': round(safe_float(trade.profit_loss_percentage), 2),
             'status': trade.status,
             'investment_ratio': trade.investment_ratio,
             'decision_reason': trade.decision_reason
